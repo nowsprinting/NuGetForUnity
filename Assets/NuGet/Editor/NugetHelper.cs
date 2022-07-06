@@ -1455,10 +1455,44 @@
                 {
                     EditorUtility.DisplayProgressBar(string.Format("Installing {0} {1}", package.Id, package.Version), "Importing Package", 0.95f);
                     AssetDatabase.Refresh();
+                    ModifyImportSettingsIfRoslynAnalyzer(package.Id, package.Version);
                     EditorUtility.ClearProgressBar();
                 }
             }
             return installSuccess;
+        }
+
+        private static void ModifyImportSettingsIfRoslynAnalyzer(string id, string version)
+        {
+            var dir = Path.Combine(NugetConfigFile.RepositoryPath, $"{id}.{version}");
+            if (!Directory.Exists(dir))
+            {
+                Debug.LogError($"Directory {dir} not found.");
+                return;
+            }
+
+            foreach (var analyzer in Directory.GetFiles(dir, "*.dll", SearchOption.AllDirectories)
+                .Where(x => x.Contains("/analyzers/")))
+            {
+                // Trigger Unity to create the meta file, the path for ImportAsset MUST be relative to the project path
+                var projectRelativePath = analyzer.Substring(new DirectoryInfo(Application.dataPath).Parent.FullName.Length + 1);
+                AssetDatabase.ImportAsset(projectRelativePath, ImportAssetOptions.ForceSynchronousImport);
+                var meta = AssetImporter.GetAtPath(projectRelativePath) as PluginImporter;
+                if (meta == null)
+                {
+                    Debug.LogWarning($".meta file not found: {analyzer}");
+                    continue;
+                }
+
+                meta.SetCompatibleWithAnyPlatform(false);
+                meta.SetCompatibleWithEditor(false);
+                foreach (var platform in Enum.GetValues(typeof(BuildTarget)))
+                {
+                    meta.SetExcludeFromAnyPlatform((BuildTarget) platform, false);
+                }
+
+                AssetDatabase.SetLabels(meta, new[] {"RoslynAnalyzer"});
+            }
         }
 
         private static void WarnIfDotNetAuthenticationIssue(Exception e)
